@@ -36,13 +36,13 @@ class GPT(nn.Module):
         assert T <= self.config.block_size
 
         pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
-        pos_emb = self.transformer.wpe(pos) # (T, n_embd)
-        tok_emb = self.transformer.wte(idx) # (B, T, n_embd)
+        pos_emb = self.transformer.wpe(pos)  # (T, n_embd)
+        tok_emb = self.transformer.wte(idx)  # (B, T, n_embd)
         x = pos_emb + tok_emb
 
         for block in self.transformer.h:
             x = block(x)
-        
+
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)
         return logits
@@ -124,7 +124,7 @@ class MLP(nn.Module):
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
 
     def forward(self, x):
-        x = self.c_fc
+        x = self.c_fc(x)
         x = self.gelu(x)
         x = self.c_proj(x)
         return x
@@ -167,6 +167,7 @@ class CausalSelfAttention(nn.Module):
         att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
         att = F.softmax(att, dim=-1)
         y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
         y = self.c_proj(y)
         return y
 
@@ -180,7 +181,34 @@ model = GPT.from_pretrained("gpt2")
 # eval and train mode. Our model doesn't have those, so this
 # line is probably not needed.
 model.eval()
-model.to('cuda')
+model.to("cuda")
 
 import tiktoken
-enc = tiktoken.
+
+enc = tiktoken.get_encoding("gpt2")
+tokens = enc.encode("Hello, I'm a language model,")
+# (8,)
+tokens = torch.tensor(tokens, dtype=torch.long) 
+# (5, 8)
+tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)
+x = tokens.to('cuda')
+
+torch.manual_seed(42)
+while x.size(1) < max_length:
+    with torch.no_grad():
+        logits = model(x) # (B, T, vocab_size)
+        logits = logits[:, -1, :] # (B, vocab_size)
+
+        probs = F.softmax(logits, dim=-1)
+        # topk_probs: (B, 50), topk_indices: (B, 50)
+        topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
+        ix = torch.multinomial(topk_probs, 1) # (B, 1)
+        # ix is the index in [0, 50), we want
+        # xcol[i][j] = topk_indices[i][ix[i][j]]
+        xcol = torch.gather(topk_indices, -1, ix) # (B, 1)
+        x = torch.cat((x, xcol), dim=1)
+
+for i in range(num_return_sequences):
+    tokens = x[i, :max_length].tolist()
+    decoded = enc.decode(tokens)
+    print(">", decoded)
