@@ -173,39 +173,63 @@ class CausalSelfAttention(nn.Module):
 
 
 # ---------------------------------------------------------------
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda"
+elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+    device = "mps"
+print("Using device: ", device)
+device = 'cpu'
 num_return_sequences = 5
 max_length = 30
 
-model = GPT.from_pretrained("gpt2")
-# Only dropout and batchNorm has different bahavior between
-# eval and train mode. Our model doesn't have those, so this
-# line is probably not needed.
-model.eval()
-model.to("cuda")
 
 import tiktoken
 
 enc = tiktoken.get_encoding("gpt2")
+
+with open("input.txt", "r") as f:
+    text = f.read()
+text = text[:1000]
+tokens = enc.encode(text)
+B, T = 4, 32
+buf = torch.tensor(tokens[:B * T + 1])
+x = buf[:-1].view(B, T)
+y = buf[1:].view(B, T)
+
+# model = GPT.from_pretrained("gpt2")
+model = GPT(GPTConfig())
+# Only dropout and batchNorm has different bahavior between
+# eval and train mode. Our model doesn't have those, so this
+# line is probably not needed.
+# model.eval()
+model.to(device)
+logits = model(x)
+
+print(logits.shape)
+import sys; sys.exit(0)
+
+enc = tiktoken.get_encoding("gpt2")
 tokens = enc.encode("Hello, I'm a language model,")
 # (8,)
-tokens = torch.tensor(tokens, dtype=torch.long) 
+tokens = torch.tensor(tokens, dtype=torch.long)
 # (5, 8)
 tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)
-x = tokens.to('cuda')
+x = tokens.to(device)
 
 torch.manual_seed(42)
 while x.size(1) < max_length:
     with torch.no_grad():
-        logits = model(x) # (B, T, vocab_size)
-        logits = logits[:, -1, :] # (B, vocab_size)
+        logits = model(x)  # (B, T, vocab_size)
+        logits = logits[:, -1, :]  # (B, vocab_size)
 
         probs = F.softmax(logits, dim=-1)
         # topk_probs: (B, 50), topk_indices: (B, 50)
         topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
-        ix = torch.multinomial(topk_probs, 1) # (B, 1)
+        ix = torch.multinomial(topk_probs, 1)  # (B, 1)
         # ix is the index in [0, 50), we want
         # xcol[i][j] = topk_indices[i][ix[i][j]]
-        xcol = torch.gather(topk_indices, -1, ix) # (B, 1)
+        xcol = torch.gather(topk_indices, -1, ix)  # (B, 1)
         x = torch.cat((x, xcol), dim=1)
 
 for i in range(num_return_sequences):
