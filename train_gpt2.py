@@ -31,7 +31,7 @@ class GPT(nn.Module):
 
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
-    def forward(self, idx):
+    def forward(self, idx, targets=None):
         B, T = idx.size()
         assert T <= self.config.block_size
 
@@ -45,6 +45,9 @@ class GPT(nn.Module):
 
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)
+        loss = None
+        if targets is not None:
+
         return logits
 
     @classmethod
@@ -179,7 +182,7 @@ if torch.cuda.is_available():
 elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     device = "mps"
 print("Using device: ", device)
-device = 'cpu'
+device = "cpu"
 num_return_sequences = 5
 max_length = 30
 
@@ -193,7 +196,7 @@ with open("input.txt", "r") as f:
 text = text[:1000]
 tokens = enc.encode(text)
 B, T = 4, 32
-buf = torch.tensor(tokens[:B * T + 1])
+buf = torch.tensor(tokens[: B * T + 1])
 x = buf[:-1].view(B, T)
 y = buf[1:].view(B, T)
 
@@ -204,10 +207,12 @@ model = GPT(GPTConfig())
 # line is probably not needed.
 # model.eval()
 model.to(device)
-logits = model(x)
+logits, loss = model(x, y)
 
-print(logits.shape)
-import sys; sys.exit(0)
+print(loss)
+import sys
+
+sys.exit(0)
 
 enc = tiktoken.get_encoding("gpt2")
 tokens = enc.encode("Hello, I'm a language model,")
