@@ -44,11 +44,12 @@ class GPT(nn.Module):
             x = block(x)
 
         x = self.transformer.ln_f(x)
-        logits = self.lm_head(x)
+        logits = self.lm_head(x)  # (B, T, vocab_size)
         loss = None
         if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
 
-        return logits
+        return logits, loss
 
     @classmethod
     def from_pretrained(cls, model_type):
@@ -181,8 +182,8 @@ if torch.cuda.is_available():
     device = "cuda"
 elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     device = "mps"
+# device = "cpu"
 print("Using device: ", device)
-device = "cpu"
 num_return_sequences = 5
 max_length = 30
 
@@ -191,14 +192,33 @@ import tiktoken
 
 enc = tiktoken.get_encoding("gpt2")
 
-with open("input.txt", "r") as f:
-    text = f.read()
-text = text[:1000]
-tokens = enc.encode(text)
-B, T = 4, 32
-buf = torch.tensor(tokens[: B * T + 1])
-x = buf[:-1].view(B, T)
-y = buf[1:].view(B, T)
+
+class DataLoaderLite:
+    def __init__(self, B, T):
+        self.B = B
+        self.T = T
+
+        with open("input.txt", "r") as f:
+            text = f.read()
+        tokens = enc.encode(text)
+        self.tokens = torch.tensor(tokens)
+        print(f"loaded {len(self.tokens)} tokens")
+        print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
+
+        self.current_position = 0
+
+    def next_batch(self):
+        B, T = self.B, self.T
+        buf = self.tokens[self.current_position : self.current_position + B * T + 1]
+        x = buf[:-1].view(B, T)
+        y = buf[1:].view(B, T)
+        self.current_position += B * T
+        if self.current_position + B * T + 1 > len(self.tokens):  # off by 1?
+            self.current_position = 0
+        return x, y
+
+
+train_loader = DataLoaderLite(B=4, T=32)
 
 # model = GPT.from_pretrained("gpt2")
 model = GPT(GPTConfig())
@@ -207,7 +227,18 @@ model = GPT(GPTConfig())
 # line is probably not needed.
 # model.eval()
 model.to(device)
-logits, loss = model(x, y)
+# logits, loss = model(x, y)
+
+# Andrej: AdamW is fixing a bug in Adam
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+for i in range(50):
+    x, y = train_loader.next_batch()
+    x, y = x.to(device), y.to(device)
+    optimizer.zero_grad()
+    logits, loss = model(x, y)
+    loss.backward()
+    optimizer.step()
+    print(f"step {i}, loss: {loss.item()}")
 
 print(loss)
 import sys
