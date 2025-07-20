@@ -202,6 +202,8 @@ class CausalSelfAttention(nn.Module):
 
 
 # ---------------------------------------------------------------
+# Autodetect device
+import time
 device = "cpu"
 if torch.cuda.is_available():
     device = "cuda"
@@ -248,7 +250,7 @@ class DataLoaderLite:
         return x, y
 
 
-train_loader = DataLoaderLite(B=4, T=32)
+train_loader = DataLoaderLite(B=16, T=1024)
 
 # model = GPT.from_pretrained("gpt2")
 model = GPT(GPTConfig())
@@ -262,15 +264,18 @@ model.to(device)
 # Andrej: AdamW is fixing a bug in Adam
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
 for i in range(50):
+    t0 = time.time()
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
     logits, loss = model(x, y)
     loss.backward()
     optimizer.step()
-    print(f"step {i}, loss: {loss.item()}")
+    torch.cuda.synchronize() # wait for all kernels to finish
+    t1 = time.time()
+    dt = (t1 - t0) * 1000
+    print(f"step {i}, loss: {loss.item()}, time: {dt:.2f}ms")
 
-print(loss)
 import sys
 
 sys.exit(0)
