@@ -31,6 +31,29 @@ class GPT(nn.Module):
 
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
+        # Weights sharing: tie the input and output embeddings
+        self.transformer.wte.weight = self.lm_head.weight
+
+        # Initialize weights
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            std = 0.02
+            if hasattr(module, "NANOGPT_SCALE_INIT"):
+                std *= (2 * self.config.n_layer) ** -0.5
+                # 2 since we have two `x +=` in the attention block
+            # Consistent with Xavier initialization: std = 1/sqrt(fan_in)
+            # where fan_in is the number of input features.
+            # For GPT, fan_in = n_embd = 768, 1600, etc.
+            # 1/sqrt(768) = 0.0365, 1/sqrt(1600) = 0.025. Close to 0.02.
+            nn.init.normal_(module.weight, mean=0.0, std=std)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            # Normal initialization for embeddings
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
     def forward(self, idx, targets=None):
         B, T = idx.size()
         assert T <= self.config.block_size
@@ -126,6 +149,7 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
         self.gelu = nn.GELU(approximate="tanh")
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -145,6 +169,7 @@ class CausalSelfAttention(nn.Module):
         # on the left: M @ input
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
         self.c_proj = nn.Linear(config.n_embd, config.n_embd)
+        self.c_proj.NANOGPT_SCALE_INIT = 1
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.register_buffer(
@@ -184,6 +209,11 @@ elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
     device = "mps"
 # device = "cpu"
 print("Using device: ", device)
+
+torch.manual_seed(1337)
+if device == "cuda":
+    torch.cuda.manual_seed(1337)
+
 num_return_sequences = 5
 max_length = 30
 
@@ -253,7 +283,6 @@ tokens = torch.tensor(tokens, dtype=torch.long)
 tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)
 x = tokens.to(device)
 
-torch.manual_seed(42)
 while x.size(1) < max_length:
     with torch.no_grad():
         logits = model(x)  # (B, T, vocab_size)
