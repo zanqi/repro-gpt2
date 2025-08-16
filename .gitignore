@@ -1,2 +1,6 @@
 input.txt
 edu_fineweb10B/
+__pycache__/
+log/
+hellaswag/
+slurm-*.out

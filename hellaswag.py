@@ -34,7 +34,6 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from fineweb import DATA_CACHE_DIR
 from transformers import GPT2LMHeadModel
 
 # --------------------------------------------------------
