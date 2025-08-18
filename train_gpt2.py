@@ -400,7 +400,7 @@ raw_model = model.module if ddp else model
 max_lr = 6e-4
 min_lr = max_lr * 0.1
 warmup_steps = 715  # gpt paper said 375e6 warmup tokens => 375e6 / 2**19 = 715
-max_steps = 19073  # 10e9/2**19 = 19073
+max_steps = 19073 * 3  # 10e9/2**19 = 19073
 
 
 def get_lr(step: int) -> float:
@@ -445,13 +445,14 @@ for step in range(max_steps):
                 x, y = x.to(device), y.to(device)
                 with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
                     logits, loss = model(x, y)
+                loss = loss / val_loss_steps
                 val_loss_accum += loss.detach()
         if ddp:
             torch.distributed.all_reduce(
                 val_loss_accum, op=torch.distributed.ReduceOp.AVG
             )
         if master_process:
-            print(f"validation loss: {val_loss_accum / val_loss_steps:.4f}")
+            print(f"validation loss: {val_loss_accum:.4f}")
             with open(log_file, "a") as f:
                 f.write(f"{step} val {val_loss_accum.item():.4f}\n")
             check_point_path = os.path.join(log_dir, f"model_{step:05d}.pt")
