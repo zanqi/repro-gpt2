@@ -8,7 +8,7 @@ For this project, I decided to reproduce the 124 million parameter GPT-2 model f
 
 Here's the data flow of the language model:
 
-<img src="images/data_flow.png" alt="Data Flow Diagram" width="600"/>
+![Data Flow Diagram](images/data_flow.png)
 
 ## Model Architecture & Training
 
